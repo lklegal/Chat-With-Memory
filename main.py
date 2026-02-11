@@ -21,25 +21,38 @@ class ModelOutput(BaseModel):
     Only write if you decided it's something relevant. If nothing is written, the type of this field must be None.\
     Examples of observations: 'User has a cat', or 'User is afraid of heights', or 'User likes coffee'. Things like that.")
 
+def GetStringOfObservations(observations):
+    if len(observations) == 0:
+        return "No observations registered yet."
+    else:
+        return "\n".join(observations)
+
+def GetObservations():
+    allObservations = {}
+    with open("memory.json", "r") as file:
+        allObservations = json.load(file)
+    importantObsList = allObservations["important"]
+    lessImportantObsList = allObservations["lessImportant"]
+    importantObsStr = GetStringOfObservations(importantObsList)
+    lessImportantObsStr = GetStringOfObservations(lessImportantObsList)
+    return importantObsList, lessImportantObsList, importantObsStr, lessImportantObsStr
+
+def GenerateSystemPrompt(importantObsStr, lessImportantObsStr):
+    return f"You're charismatic and funny. You engage well with the user. You use your accumulated \
+observations about the user to make your conversational approach more personalized. You have two sets of \
+observations about the user: important and less important.\n\n\
+Here are your important observations so far:\n\n{importantObsStr}\n\n\
+Here are your less important observations so far:\n\n{lessImportantObsStr}"
+
 if __name__ == "__main__":
     load_dotenv()
-
-    observations = []
-    with open("memory.json", "r") as file:
-        observations = json.load(file)
-    listedObservations = ""
-    if len(observations) == 0:
-        listedObservations = "No observations registered yet."
-    else:
-        for observation in observations:
-            listedObservations += observation + "\n"
-    system_prompt = "You're charismatic and funny. You engage well with the user. You use your accumulated\
-    observations about the user to make your conversational approach more personalized.\n\n\
-    Here are your observations about the user so far:\n\n" + listedObservations
-
+    maxImportantObservations = 10
+    maxLessImportantObservations = 15
+    importantObsList, lessImportantObsList, importantObsStr, lessImportantObsStr = GetObservations()
+    system_prompt = GenerateSystemPrompt(importantObsStr, lessImportantObsStr)
     history = [SystemMessage(system_prompt)]
     model = init_chat_model("gpt-4o-mini")
-    modelWithStructure = model.with_structured_output(ModelOutput)
+    modelWithStructure = model.with_structured_output(ModelOutput, include_raw=True)
 
     while True:
         prompt = input(">>>")
@@ -47,10 +60,18 @@ if __name__ == "__main__":
             break
         history.append(HumanMessage(prompt))
         response = modelWithStructure.invoke(history)
-        history.append(AIMessage(response.answer))
-        print(response)
+        structuredResponse = response["parsed"]
+        history.append(AIMessage(structuredResponse.answer))
+        #print(response)
+        print(structuredResponse)
 
-        if response.optionalShortUserObservation != None:
-            observations.append(response.optionalShortUserObservation)
+        if structuredResponse.optionalShortUserObservation != None:
+            obsList = importantObsList if len(importantObsList) < maxImportantObservations \
+                else lessImportantObsList
+            obsList.append(structuredResponse.optionalShortUserObservation)
             with open("memory.json", "w") as file:
-                json.dump(observations, file, indent=4)
+                allObservations = {    
+                    "important": importantObsList,
+                    "lessImportant": lessImportantObsList
+                }
+                json.dump(allObservations, file, indent=4)
