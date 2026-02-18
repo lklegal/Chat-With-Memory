@@ -4,6 +4,7 @@ from langchain.messages import HumanMessage, SystemMessage, AIMessage#, AIMessag
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 import json
+from retrieval import Retrieval
 
 class ModelOutput(BaseModel):
     """
@@ -46,6 +47,7 @@ Here are your less important observations so far:\n\n{lessImportantObsStr}"
 
 if __name__ == "__main__":
     load_dotenv()
+    retrieval = Retrieval()
     maxImportantObservations = 10
     maxLessImportantObservations = 15
     importantObsList, lessImportantObsList, importantObsStr, lessImportantObsStr = GetObservations()
@@ -57,6 +59,7 @@ if __name__ == "__main__":
     while True:
         prompt = input(">>>")
         if prompt == "/exit":
+            retrieval.dbConnection.close()
             break
         history.append(HumanMessage(prompt))
         response = modelWithStructure.invoke(history)
@@ -69,6 +72,13 @@ if __name__ == "__main__":
             obsList = importantObsList if len(importantObsList) < maxImportantObservations \
                 else lessImportantObsList
             obsList.append(structuredResponse.optionalShortUserObservation)
+            if len(importantObsList) < maxImportantObservations:
+                importantObsStr = GetStringOfObservations(obsList)
+            else:
+                lessImportantObsStr = GetStringOfObservations(obsList)
+            newSystemPrompt = GenerateSystemPrompt(importantObsStr, lessImportantObsStr)
+            history[0] = SystemMessage(newSystemPrompt)
+            print(history)
             with open("memory.json", "w") as file:
                 allObservations = {    
                     "important": importantObsList,
