@@ -12,4 +12,5 @@ def InitializeDB():
         category TEXT)\
     ")
     conn.commit()
+    
     return conn, cursor
