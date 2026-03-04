@@ -1,26 +1,57 @@
 from langchain.chat_models import init_chat_model
 from output_schemas import SummarizationModelOutput
 import json
+from pydantic import BaseModel
+from langchain.messages import HumanMessage, SystemMessage, AIMessage
+import os
+
+class ConversationStateSchema(BaseModel):
+    generalSummary: str
+    lastBatchSummary: str
+    indexOfBatchCutoff: int | None
+    history: list[str]
 
 class ContextManagement:
     def __init__(self, maxImportantObservations, maxLessImportantObservations, maxPromptLength, retriever):
-        savedState = {}
-        with open("conversation_state.json", "w") as file:
-            savedState = json.load(file)
-        # here goes the saved state loading logic
         self.maxImportantObservations = maxImportantObservations
         self.maxLessImportantObservations = maxLessImportantObservations
         self.maxPromptLength = maxPromptLength
         self.batchSizeInTokens = 15000
         self.noSummaryString = "No summary yet. The conversation is not yet long enough for this summary to be necessary."
-        self.generalSummary = self.noSummaryString
-        self.lastBatchSummary = self.noSummaryString
-        self.indexOfBatchCutoff = None
+        self.history = []
         summarizationModel = init_chat_model("gpt-4o-mini", max_tokens=2000)
         self.summarizationModelWithStructure = summarizationModel.with_structured_output(SummarizationModelOutput)
         #tech debt, refactor later
         self.retriever = retriever
-        self.history = []
+        #
+        savedState = {}
+        jsonFileName = "conversation_state.json"
+        if not os.path.exists(jsonFileName):
+            with open(jsonFileName, "w") as file:
+                json.dump({}, file)
+        hasValidSavedState = True
+        with open(jsonFileName, "r") as file:
+            savedState = json.load(file)
+        try:
+           ConversationStateSchema.model_validate_json(json.dumps(savedState))
+        except:
+            hasValidSavedState = False
+        if hasValidSavedState:
+            self.generalSummary = savedState["generalSummary"]
+            self.lastBatchSummary = savedState["lastBatchSummary"]
+            self.indexOfBatchCutoff = savedState["indexOfBatchCutoff"]
+            print(self.indexOfBatchCutoff)
+            for i, message in enumerate(savedState["history"]):
+                if i == 0:
+                    self.history.append(SystemMessage(message))
+                elif i%2 == 0:
+                    self.history.append(AIMessage(message))
+                else:
+                    self.history.append(HumanMessage(message))
+        else:
+            self.generalSummary = self.noSummaryString
+            self.lastBatchSummary = self.noSummaryString
+            self.indexOfBatchCutoff = None
 
     def __GetStringOfObservations(self, observations: list) -> str:
         if len(observations) == 0:

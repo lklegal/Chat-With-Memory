@@ -19,7 +19,6 @@ if __name__ == "__main__":
             continue
         if prompt == "/exit":
             contextManager.retriever.dbConnection.close()
-            contextManager.PersistConversation()
             break
         systemPrompt = contextManager.GenerateSystemPrompt(prompt)
         #print(systemPrompt)
@@ -33,6 +32,7 @@ if __name__ == "__main__":
         contextManager.history.append(AIMessage(structuredResponse.answer))
         totalTokens = response["raw"].usage_metadata["total_tokens"]
         contextManager.ManageContextCompaction(totalTokens)
+        contextManager.PersistConversation()
         print(structuredResponse.answer)
 
         if structuredResponse.optionalShortUserObservation != None:
