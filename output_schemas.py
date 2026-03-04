@@ -33,3 +33,6 @@ class DeduplicationModelOutput(BaseModel):
      newObservationIsDuplicate: bool = Field(description=("This should be True if you concluded the "
      "new observation is a duplication (near identical, paraphrase or same general meaning) of any of "
      "the other observations provided, and False otherwise."))
+
+class SummarizationModelOutput(BaseModel):
+     summary: str = Field(description=("Here goes your summary, according to the request. Please, keep it under 2000 characters."))

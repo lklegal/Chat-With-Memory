@@ -16,3 +16,4 @@ wheels/
 test.py
 test2.py
 memory.db
+conversation_state_test.json

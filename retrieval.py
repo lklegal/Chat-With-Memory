@@ -7,6 +7,17 @@ from output_schemas import DeduplicationModelOutput
 from langchain.chat_models import init_chat_model
 
 class Retrieval:
+    def __FetchImportantObservationsWithId(self) -> list[dict]:
+        observations = []
+        self.dbCursor.execute("SELECT rowid, plain_text FROM memories WHERE category = 'important';")
+        data = self.dbCursor.fetchall()
+        for memory in data:
+            memDict = {}
+            memDict["id"] = memory[0]
+            memDict["plain_text"] = memory[1]
+            observations.append(memDict)
+        return observations
+    
     def __InsertAchorIntoDB(self, anchorText: str, anchorVector: list[float], anchorName: str):
             self.dbCursor.execute(("INSERT INTO memories (vector, plain_text, category) "
             "VALUES (vec_f32(?), ?, ?);"), (json.dumps(anchorVector), anchorText, anchorName))
@@ -14,8 +25,8 @@ class Retrieval:
     
     def __init__(self):        
         self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        self.embeddings_dim = 1536
         self.dbConnection, self.dbCursor = vector_store.InitializeDB()
+        self.importantObsList = self.__FetchImportantObservationsWithId()
         deduplicationModel = init_chat_model("gpt-4o-mini")
         self.deduplicationModelWithStructure = deduplicationModel.with_structured_output(DeduplicationModelOutput)
         self.dbCursor.execute("SELECT vector FROM memories WHERE category = 'stability_anchor';")
@@ -65,20 +76,9 @@ class Retrieval:
         else:
             blob = nonImportanceAnchorQueryResult[0][0]
             self.nonImportanceAnchorVector = (np.frombuffer(blob, dtype=np.float32)).tolist()
-
-    def FetchImportantObservations(self) -> list[dict]:
-        observations = []
-        self.dbCursor.execute("SELECT rowid, plain_text FROM memories WHERE category = 'important';")
-        data = self.dbCursor.fetchall()
-        for memory in data:
-            memDict = {}
-            memDict["id"] = memory[0]
-            memDict["plain_text"] = memory[1]
-            observations.append(memDict)
-        return observations
     
     def FetchLessImportantObservations(self, humanMessage: str, maxLessImportantObservations: int) -> str:
-        lessImportantObsStr = ""
+        observationStrings = []
         self.dbCursor.execute("SELECT EXISTS (\
             SELECT 1 FROM memories WHERE category = 'less_relevant'\
         );")
@@ -88,12 +88,9 @@ class Retrieval:
             category = 'less_relevant' ORDER BY vec_distance_cosine(vector, vec_f32(?)) ASC \
             LIMIT ?;", (json.dumps(humanMessageVector), maxLessImportantObservations))
             data = self.dbCursor.fetchall()
-            for observation in data:
-                lessImportantObsStr += (observation[0] + "\n")
-            lessImportantObsStr = lessImportantObsStr[:-1]
-        else:
-            lessImportantObsStr = "No observations registered yet."
-        return lessImportantObsStr
+            for row in data:
+                observationStrings.append(row[0])
+        return observationStrings
     
     def __FindPossibleDuplicate(self, observation: str, observationVector: list[float]) -> bool:
         self.dbCursor.execute(("SELECT plain_text FROM memories WHERE category IN ('important', 'less_relevant') ORDER BY " 
@@ -156,27 +153,27 @@ class Retrieval:
         newObservationId = (self.dbCursor.fetchall())[0][0]
         return newObservationId
     
-    def AddNewObservation(self, observation: str, importantObservations: list[dict], maxImportantObservations: int):
+    def AddNewObservation(self, observation: str, maxImportantObservations: int):
         observationVector = self.embeddings.embed_query(observation)
-        if len(importantObservations) > 0:
+        if len(self.importantObsList) > 0:
             hasDuplicate = self.__FindPossibleDuplicate(observation, observationVector)
             if hasDuplicate:
                 return
         print(f"Memory updated: {observation}")
-        if len(importantObservations) >= maxImportantObservations:
+        if len(self.importantObsList) >= maxImportantObservations:
             leastRelevantButStillRelevantObservation = self.__FindLeastRelevantButStillRelevantObservation()
             newObservationRelevanceScore = self.__ComputeObservationRelevance(observationVector)
             if newObservationRelevanceScore < leastRelevantButStillRelevantObservation["relevanceScore"]:
                 index = 0
-                newLessRelevantObservation = importantObservations[0]
+                newLessRelevantObservation = self.importantObsList[0]
                 while newLessRelevantObservation["id"] != leastRelevantButStillRelevantObservation["id"]:
                     index += 1
-                    newLessRelevantObservation = importantObservations[index]
+                    newLessRelevantObservation = self.importantObsList[index]
                 self.dbCursor.execute("UPDATE memories SET category = 'less_relevant' WHERE \
                                       rowid = ?", (newLessRelevantObservation["id"],))
                 self.__InsertObservationIntoDB(observation, observationVector, "important")
                 newObservationId = self.__GetObservationID(observation)
-                importantObservations[index] = {
+                self.importantObsList[index] = {
                     "id": newObservationId,
                     "plain_text": observation
                 }
@@ -185,7 +182,7 @@ class Retrieval:
         else:
             self.__InsertObservationIntoDB(observation, observationVector, "important")
             newObservationId = self.__GetObservationID(observation)
-            importantObservations.append({
+            self.importantObsList.append({
                 "id": newObservationId,
                 "plain_text": observation
             })

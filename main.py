@@ -1,56 +1,42 @@
 from langchain.chat_models import init_chat_model
 from langchain.messages import HumanMessage, SystemMessage, AIMessage#, AIMessageChunk
 from dotenv import load_dotenv
-from retrieval import Retrieval
 from output_schemas import MainModelOutput
-
-def GetStringOfImportantObservations(observations: list[dict]) -> str:
-    if len(observations) == 0:
-        return "No observations registered yet."
-    else:
-        importantObsStr = ""
-        for observation in observations:
-            importantObsStr += (observation["plain_text"] + "\n")
-        return importantObsStr[:-1]
-
-def GenerateSystemPrompt(importantObsStr: str, humanMessage: str, maxLessImportantObservations: int) -> str:
-    lessImportantObsStr = retrieval.FetchLessImportantObservations(humanMessage, maxLessImportantObservations)
-    #print(lessImportantObsStr)
-    return ("You're charismatic and funny. You engage well with the user. You use your accumulated "
-            "observations about the user to make your conversational approach more personalized. "
-            "You have two sets of observations about the user: important and less important.\n\n"
-            f"Here are your important observations so far:\n\n{importantObsStr}\n\n"
-            f"Here are your less important observations so far:\n\n{lessImportantObsStr}")
+from context_management import ContextManagement
+from retrieval import Retrieval
 
 if __name__ == "__main__":
     load_dotenv()
-    retrieval = Retrieval()
-    maxImportantObservations = 10
-    maxLessImportantObservations = 10
-    importantObsList = retrieval.FetchImportantObservations() 
-    history = []
+    retriever = Retrieval()
+    contextManager = ContextManagement(10, 10, 8000, retriever)
     model = init_chat_model("gpt-4o-mini")
     modelWithStructure = model.with_structured_output(MainModelOutput, include_raw=True)
 
     while True:
         prompt = input(">>>")
+        if len(prompt) > contextManager.maxPromptLength:
+            print(f"Error: This message is over the {contextManager.maxPromptLength} characters limit.")
+            continue
         if prompt == "/exit":
-            retrieval.dbConnection.close()
+            contextManager.retriever.dbConnection.close()
+            contextManager.PersistConversation()
             break
-        importantObsStr = GetStringOfImportantObservations(importantObsList)
-        systemPrompt = GenerateSystemPrompt(importantObsStr, prompt, maxLessImportantObservations)
+        systemPrompt = contextManager.GenerateSystemPrompt(prompt)
         #print(systemPrompt)
-        if len(history) == 0:
-            history.append(SystemMessage(systemPrompt))
+        if len(contextManager.history) == 0:
+            contextManager.history.append(SystemMessage(systemPrompt))
         else:
-            history[0] = SystemMessage(systemPrompt)
-        history.append(HumanMessage(prompt))
-        response = modelWithStructure.invoke(history)
+            contextManager.history[0] = SystemMessage(systemPrompt)
+        contextManager.history.append(HumanMessage(prompt))
+        response = modelWithStructure.invoke(contextManager.history)
         structuredResponse = response["parsed"]
-        history.append(AIMessage(structuredResponse.answer))
-        #print(response)
+        contextManager.history.append(AIMessage(structuredResponse.answer))
+        totalTokens = response["raw"].usage_metadata["total_tokens"]
+        contextManager.ManageContextCompaction(totalTokens)
         print(structuredResponse.answer)
 
         if structuredResponse.optionalShortUserObservation != None:
-            retrieval.AddNewObservation(structuredResponse.optionalShortUserObservation,
-                                        importantObsList, maxImportantObservations)
+            #weird edge case that actually happened in testing (LLMs being LLMs):
+            if structuredResponse.optionalShortUserObservation != "":
+                retriever.AddNewObservation(structuredResponse.optionalShortUserObservation,
+                                            contextManager.maxImportantObservations)
