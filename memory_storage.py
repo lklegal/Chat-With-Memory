@@ -1,37 +1,18 @@
 from langchain_openai import OpenAIEmbeddings
-import vector_store
 import numpy as np
 import json
-from typing import Literal
 from output_schemas import DeduplicationModelOutput
 from langchain.chat_models import init_chat_model
 
-class Retrieval:
-    def __FetchImportantObservationsWithId(self) -> list[dict]:
-        observations = []
-        self.dbCursor.execute("SELECT rowid, plain_text FROM memories WHERE category = 'important';")
-        data = self.dbCursor.fetchall()
-        for memory in data:
-            memDict = {}
-            memDict["id"] = memory[0]
-            memDict["plain_text"] = memory[1]
-            observations.append(memDict)
-        return observations
-    
-    def __InsertAchorIntoDB(self, anchorText: str, anchorVector: list[float], anchorName: str):
-            self.dbCursor.execute(("INSERT INTO memories (vector, plain_text, category) "
-            "VALUES (vec_f32(?), ?, ?);"), (json.dumps(anchorVector), anchorText, anchorName))
-            self.dbConnection.commit()
-    
-    def __init__(self):        
+class Storage:
+    def __init__(self, vectorStore, importantObsList):
+        self.vectorStore = vectorStore
+        self.importantObsList = importantObsList
         self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        self.dbConnection, self.dbCursor = vector_store.InitializeDB()
-        self.importantObsList = self.__FetchImportantObservationsWithId()
         deduplicationModel = init_chat_model("gpt-4o-mini")
         self.deduplicationModelWithStructure = deduplicationModel.with_structured_output(DeduplicationModelOutput)
-        self.dbCursor.execute("SELECT vector FROM memories WHERE category = 'stability_anchor';")
-        stabilityAnchorQueryResult = self.dbCursor.fetchall()
-        if stabilityAnchorQueryResult == []:
+        stabilityAnchorQueryResult = self.vectorStore.GetAnchor('stability_anchor')
+        if stabilityAnchorQueryResult == None:
             stabilityAnchor = ("A stable, long-term characteristic, preference, goal, "
             "constraint, or behavioral tendency of the user. This includes enduring response "
             "style preferences, recurring values, consistent habits, long-term projects, "
@@ -40,14 +21,13 @@ class Retrieval:
             "across many future interactions. It does NOT include temporary moods, one-time "
             "events, or situational emotional states.")
             self.stabilityAnchorVector = self.embeddings.embed_query(stabilityAnchor)
-            self.__InsertAchorIntoDB(stabilityAnchor, self.stabilityAnchorVector, 'stability_anchor')
+            self.vectorStore.InsertAchor(stabilityAnchor, json.dumps(self.stabilityAnchorVector), 'stability_anchor')
         else:
-            blob = stabilityAnchorQueryResult[0][0]
+            blob = stabilityAnchorQueryResult[0]
             self.stabilityAnchorVector = (np.frombuffer(blob, dtype=np.float32)).tolist()
         
-        self.dbCursor.execute("SELECT vector FROM memories WHERE category = 'future_usefulness_anchor';")
-        futureUsefulnessAnchorQueryResult = self.dbCursor.fetchall()
-        if futureUsefulnessAnchorQueryResult == []:
+        futureUsefulnessAnchorQueryResult = self.vectorStore.GetAnchor('future_usefulness_anchor')
+        if futureUsefulnessAnchorQueryResult == None:
             futureUsefulnessAnchor = ("Information about the user that would meaningfully "
             "improve the assistant’s ability to provide better answers in future "
             "conversations. This includes preferences about response length, tone, "
@@ -57,14 +37,13 @@ class Retrieval:
             "interactions. It excludes trivial personal trivia or facts unlikely to affect "
             "future responses.")
             self.futureUsefulnessAnchorVector = self.embeddings.embed_query(futureUsefulnessAnchor)
-            self.__InsertAchorIntoDB(futureUsefulnessAnchor, self.futureUsefulnessAnchorVector, 'future_usefulness_anchor')
+            self.vectorStore.InsertAchor(futureUsefulnessAnchor, json.dumps(self.futureUsefulnessAnchorVector), 'future_usefulness_anchor')
         else:
-            blob = futureUsefulnessAnchorQueryResult[0][0]
+            blob = futureUsefulnessAnchorQueryResult[0]
             self.futureUsefulnessAnchorVector = (np.frombuffer(blob, dtype=np.float32)).tolist()
         
-        self.dbCursor.execute("SELECT vector FROM memories WHERE category = 'non_importance_anchor';")
-        nonImportanceAnchorQueryResult = self.dbCursor.fetchall()
-        if nonImportanceAnchorQueryResult == []:    
+        nonImportanceAnchorQueryResult = self.vectorStore.GetAnchor('non_importance_anchor')
+        if nonImportanceAnchorQueryResult == None:    
             nonImportanceAnchor = ("A temporary mood, fleeting emotion, one-time event, "
             "situational update, random fact, or trivial personal detail that is unlikely "
             "to influence future conversations in a meaningful way. This includes transient "
@@ -72,30 +51,13 @@ class Retrieval:
             "style, or information that would not help the assistant adapt its behavior over "
             "time.")
             self.nonImportanceAnchorVector = self.embeddings.embed_query(nonImportanceAnchor)
-            self.__InsertAchorIntoDB(nonImportanceAnchor, self.nonImportanceAnchorVector, 'non_importance_anchor')
+            self.vectorStore.InsertAchor(nonImportanceAnchor, json.dumps(self.nonImportanceAnchorVector), 'non_importance_anchor')
         else:
-            blob = nonImportanceAnchorQueryResult[0][0]
+            blob = nonImportanceAnchorQueryResult[0]
             self.nonImportanceAnchorVector = (np.frombuffer(blob, dtype=np.float32)).tolist()
     
-    def FetchLessImportantObservations(self, humanMessage: str, maxLessImportantObservations: int) -> str:
-        observationStrings = []
-        self.dbCursor.execute("SELECT EXISTS (\
-            SELECT 1 FROM memories WHERE category = 'less_relevant'\
-        );")
-        if (self.dbCursor.fetchall())[0][0] == 1:
-            humanMessageVector = self.embeddings.embed_query(humanMessage)
-            self.dbCursor.execute("SELECT plain_text FROM memories WHERE \
-            category = 'less_relevant' ORDER BY vec_distance_cosine(vector, vec_f32(?)) ASC \
-            LIMIT ?;", (json.dumps(humanMessageVector), maxLessImportantObservations))
-            data = self.dbCursor.fetchall()
-            for row in data:
-                observationStrings.append(row[0])
-        return observationStrings
-    
     def __FindPossibleDuplicate(self, observation: str, observationVector: list[float]) -> bool:
-        self.dbCursor.execute(("SELECT plain_text FROM memories WHERE category IN ('important', 'less_relevant') ORDER BY " 
-        "vec_distance_cosine(vec_f32(?), vector) ASC LIMIT 10;"), (json.dumps(observationVector),))
-        duplicateCandidates = self.dbCursor.fetchall()
+        duplicateCandidates = self.vectorStore.GetPossibleDuplicates(json.dumps(observationVector))
         duplicateCandidatesStr = ""
         for index, candidate in enumerate(duplicateCandidates, 1):
             duplicateCandidatesStr += f"{index}- '{candidate[0]}';\n"
@@ -110,15 +72,11 @@ class Retrieval:
         modelOutput = self.deduplicationModelWithStructure.invoke(deduplicationPrompt)
         #print(f"########\nDEDUPLICATION FUNCTION MODEL INPUT: {deduplicationPrompt}\nOUTPUT: {modelOutput}\n########\n\n")
         return modelOutput.newObservationIsDuplicate
-    
+        
     def __ComputeObservationRelevance(self, observationVector: list[float]) -> float:
-        observationVectorStr = json.dumps(observationVector)
-        self.dbCursor.execute(("SELECT vec_distance_cosine(vec_f32(?), vec_f32(?)), "
-        "vec_distance_cosine(vec_f32(?), vec_f32(?)), vec_distance_cosine(vec_f32(?), vec_f32(?));"), 
-        (json.dumps(self.stabilityAnchorVector), observationVectorStr, 
-         json.dumps(self.futureUsefulnessAnchorVector),observationVectorStr,
-         json.dumps(self.nonImportanceAnchorVector), observationVectorStr))
-        data = self.dbCursor.fetchone()
+        data = self.vectorStore.GetSimilarityToAnchors(json.dumps(self.stabilityAnchorVector), 
+        json.dumps(self.futureUsefulnessAnchorVector), json.dumps(self.nonImportanceAnchorVector), 
+        json.dumps(observationVector))
         stabilityScore = data[0]
         futureUsefulnessScore = data[1]
         nonImportanceScore = data[2]
@@ -126,8 +84,7 @@ class Retrieval:
         return relevanceScore
 
     def __FindLeastRelevantButStillRelevantObservation(self) -> list:
-        self.dbCursor.execute("SELECT rowid, vector FROM memories WHERE category = 'important';")
-        data = self.dbCursor.fetchall()
+        data = self.vectorStore.GetImportantMemoriesVectors()
         leastRelevant = {}
         smallestRelevanceScore = -1
         for row in data:
@@ -139,18 +96,9 @@ class Retrieval:
                 smallestRelevanceScore = relevanceScore
                 leastRelevant = {"id": id, "relevanceScore": relevanceScore}
         return leastRelevant
-    
-    def __InsertObservationIntoDB(self, observation: str, observationVector: list[float],
-                                     category: Literal["important", "less_relevant"]):
-        self.dbCursor.execute("INSERT INTO memories (vector, plain_text, category) \
-                        VALUES (vec_f32(?), ?, ?);", 
-                        (json.dumps(observationVector), observation, category))
-        self.dbConnection.commit()
 
     def __GetObservationID(self, plainTextObservation: str) -> int:
-        self.dbCursor.execute("SELECT rowid FROM memories WHERE plain_text = ?",
-                        (plainTextObservation,))
-        newObservationId = (self.dbCursor.fetchall())[0][0]
+        newObservationId = self.vectorStore.GetObservationID(plainTextObservation)[0][0]
         return newObservationId
     
     def AddNewObservation(self, observation: str, maxImportantObservations: int):
@@ -159,7 +107,6 @@ class Retrieval:
             hasDuplicate = self.__FindPossibleDuplicate(observation, observationVector)
             if hasDuplicate:
                 return
-        print(f"Memory updated: {observation}")
         if len(self.importantObsList) >= maxImportantObservations:
             leastRelevantButStillRelevantObservation = self.__FindLeastRelevantButStillRelevantObservation()
             newObservationRelevanceScore = self.__ComputeObservationRelevance(observationVector)
@@ -169,21 +116,23 @@ class Retrieval:
                 while newLessRelevantObservation["id"] != leastRelevantButStillRelevantObservation["id"]:
                     index += 1
                     newLessRelevantObservation = self.importantObsList[index]
-                self.dbCursor.execute("UPDATE memories SET category = 'less_relevant' WHERE \
-                                      rowid = ?", (newLessRelevantObservation["id"],))
-                self.__InsertObservationIntoDB(observation, observationVector, "important")
+                self.vectorStore.SetMemoryAsLessRelevant(newLessRelevantObservation["id"])
+                self.vectorStore.InsertObservation(observation, json.dumps(observationVector), "important")
                 newObservationId = self.__GetObservationID(observation)
                 self.importantObsList[index] = {
                     "id": newObservationId,
                     "plain_text": observation
                 }
             else:
-                self.__InsertObservationIntoDB(observation, observationVector, "less_relevant")
+                self.vectorStore.InsertObservation(observation, json.dumps(observationVector), "less_relevant")
         else:
-            self.__InsertObservationIntoDB(observation, observationVector, "important")
+            self.vectorStore.InsertObservation(observation, json.dumps(observationVector), "important")
             newObservationId = self.__GetObservationID(observation)
             self.importantObsList.append({
                 "id": newObservationId,
                 "plain_text": observation
             })
-        #print(f"########\nADD NEW OBSERVATION FUNCTION OUTPUT: {importantObservations}\n########\n\n")
+        print(f"Memory updated: {observation}")
+
+    def ShutdownDB(self):
+        self.vectorStore.Close()

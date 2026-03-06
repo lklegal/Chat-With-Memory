@@ -11,17 +11,18 @@ class MainModelOutput(BaseModel):
     "(long term preferences, goals, values, consistent habits, professional focus, etc. - something likely to remain"
     "true across many conversations). Relevance also includes observations likely to improve the assistant’s ability "
     "to provide better answers in future conversations. This includes preferences about response length, tone, "
-    "structure, etc - something likely to be useful in the future. So, this space is where you decide if something is "
-    "relevant enough to be registered. It's fine and even desirable to not write anything. Only decide to write "
-    "when relevant. Don't write things you already know."))
+    "structure, etc - something likely to be useful in the future. DON'T WRITE ABOUT ANYTHING EPHEMERAL OR TRANSITORY."
+    "That all said, this space is where you decide if something is relevant enough to be registered. It's fine and even "
+    "desirable to not write anything. Only decide to write when relevant. Don't write things you already know."))
     optionalShortUserObservation: str | None = Field(description=("This is where you write "
     "something short about the user you want to remember, provided you concluded in your reasoning "
     "that the observation you're about to write is relevant. It's fine to not write anything. Desirable, even. "
-    "Only write if you decided it's something relevant. If nothing is written, the type of this field must be None. "
+    "Only write if you decided it's something relevant. If nothing is written, the type of this field must be None. " \
     "Examples of observations: 'User has a cat', or 'User is afraid of heights', or 'User likes coffee'. Things like that."
     "Try to generalize your observations to increase the likelihood of them being relevant. For instance, if "
     "the user says they're working on a python project, a less relevant observation would be something like 'User is working "
-    "on a python project', while more relevant observations would be things like 'User is a programmer', or 'User knows python'."))
+    "on a python project', while more relevant observations would be things like 'User is a programmer', or 'User knows python'. "
+    "DON'T WRITE ABOUT ANYTHING EPHEMERAL OR TRANSITORY, LIKE 'user is currently doing thing X'."))
 
 class DeduplicationModelOutput(BaseModel):
      reasoningAboutPossibleDuplication: str = Field(description=("This is where you write "

@@ -6,10 +6,39 @@ class HotParser:
         self.quoteCount = 0
         self.nextChrIsGuaranteedToNotBeTheEnd = False
         self.inTheAnswer = False
+
+    def __HandleNormalCharacter(self, chr: str, printableChunk: str) -> str:
+        backslashesBuffered = ("\\" * self.backslashBuffer)
+        printableChunk += backslashesBuffered+chr
+        self.backslashBuffer = 0
+        self.nextChrIsGuaranteedToNotBeTheEnd = False
+        return printableChunk
+
+    def __HandleBackslash(self):
+        self.backslashBuffer += 1
+        if self.backslashBuffer%2 == 0: self.nextChrIsGuaranteedToNotBeTheEnd = False
+        else: self.nextChrIsGuaranteedToNotBeTheEnd = True
+
+    def __HandleQuote(self, printableChunk: str, done: bool) -> tuple[str, bool]:
+        totalBackslashesToPrint = floor(self.backslashBuffer/2)
+        printableChunk += ("\\" * totalBackslashesToPrint)
+        self.backslashBuffer = 0
+        if self.nextChrIsGuaranteedToNotBeTheEnd:
+            printableChunk += "\""
+            self.nextChrIsGuaranteedToNotBeTheEnd = False
+        else:
+            self.quoteCount = 0
+            self.inTheAnswer = False
+            done = True
+        return printableChunk, done
     
     def HotParseChunk(self, chunk: str) -> tuple[str, bool]:
         printableChunk = ""
         done = False
+        if type(chunk) != str:
+            return printableChunk, done
+        elif len(chunk) == 0:
+            return printableChunk, done
         for chr in chunk:
             if not self.inTheAnswer:
                 if chr == "\"":
@@ -17,30 +46,11 @@ class HotParser:
                     if self.quoteCount == 3: self.inTheAnswer = True
             else:
                 if chr != "\\" and chr != "\"":
-                    backslashesBuffered = ""
-                    for _ in range(self.backslashBuffer):
-                        backslashesBuffered += "\\"
-                    self.backslashBuffer = 0
-                    printableChunk += backslashesBuffered+chr
-                    self.nextChrIsGuaranteedToNotBeTheEnd = False
+                    printableChunk = self.__HandleNormalCharacter(chr, printableChunk)
                 elif chr == "\\":
-                    self.backslashBuffer += 1
-                    if self.backslashBuffer%2 == 0: self.nextChrIsGuaranteedToNotBeTheEnd = False
-                    else: self.nextChrIsGuaranteedToNotBeTheEnd = True
-                    continue
+                    self.__HandleBackslash()
                 else:
-                    totalBackslashesToPrint = floor(self.backslashBuffer/2)
-                    backslashesBuffered = ""
-                    for _ in range(totalBackslashesToPrint):
-                        backslashesBuffered += "\\"
-                    printableChunk += backslashesBuffered
-                    self.backslashBuffer = 0
-                    if self.nextChrIsGuaranteedToNotBeTheEnd:
-                        printableChunk += "\""
-                        self.nextChrIsGuaranteedToNotBeTheEnd = False
-                    else:
-                        self.quoteCount = 0
-                        self.inTheAnswer = False
-                        done = True
-                        break
+                    printableChunk, done = self.__HandleQuote(printableChunk, done)
+                    if done: break
+                    
         return printableChunk, done
