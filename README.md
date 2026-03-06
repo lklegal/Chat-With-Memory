@@ -27,5 +27,5 @@ Python, LangChain, OpenAI Embeddings, uv package manager, sqlite/sqlite-vec.
 1. Clone the repo;
 1. In the terminal, in the project directory, type `uv sync` to install the dependencies (you need to have the uv package manager installed);
 1. Create a file named ".env", and add in it the line `OPENAI_API_KEY = your-OpenAI-API-key` (replace "your-OpenAI-API-key" with your actual OpenAI API key);
-1. In the terminal, in the project directory, type `uv run ./main.py` to start the chat;
+1. In the terminal, in the project directory, type `uv run ./src/main.py` to start the chat;
 1. To leave the chat and exit the program, type "/exit" in the chat.
