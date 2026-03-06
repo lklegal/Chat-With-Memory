@@ -18,12 +18,16 @@ class Retrieval:
     
     def FetchLessImportantObservations(self, humanMessage: str, maxLessImportantObservations: int) -> str:
         observationStrings = []
-        thereExistsSomeLessRelevantMemory = bool(self.vectorStore.CheckIfThereIsAnyLessRelevantMemory()[0])
-        if thereExistsSomeLessRelevantMemory:
+        data = []
+        numberOfLessRelevantMemories = self.vectorStore.CountLessRelevantMemories()[0]
+        if numberOfLessRelevantMemories > maxLessImportantObservations:
             humanMessageVector = self.embeddings.embed_query(humanMessage)
-            data = self.vectorStore.GetLessImportantObservations(json.dumps(humanMessageVector), maxLessImportantObservations)
-            for row in data:
-                observationStrings.append(row[0])
+            data = self.vectorStore.GetTopK_LessImportantObservations(json.dumps(humanMessageVector), 
+                                                                    maxLessImportantObservations)
+        elif numberOfLessRelevantMemories > 0:
+            data = self.vectorStore.GetAllLessImportantObservations()
+        for row in data:
+            observationStrings.append(row[0])
         return observationStrings
     
     def FetchImportantObservationsStrings(self) -> list[str]:

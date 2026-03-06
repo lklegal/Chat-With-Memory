@@ -28,14 +28,18 @@ class VectorStore:
         self.cursor.execute("SELECT vector FROM memories WHERE category = ?;", (anchorName,))
         return self.cursor.fetchone()
     
-    def CheckIfThereIsAnyLessRelevantMemory(self) -> tuple:
-        self.cursor.execute(("SELECT EXISTS (SELECT 1 FROM memories WHERE category = 'less_relevant');"))
+    def CountLessRelevantMemories(self) -> tuple:
+        self.cursor.execute(("SELECT COUNT(1) FROM memories WHERE category = 'less_relevant';"))
         return self.cursor.fetchone()
     
-    def GetLessImportantObservations(self, humanMessageVectorStr: str, maxLessImportantObservations: int) -> list:
+    def GetTopK_LessImportantObservations(self, humanMessageVectorStr: str, maxLessImportantObservations: int) -> list:
         self.cursor.execute(("SELECT plain_text FROM memories WHERE category = 'less_relevant' "
                              "ORDER BY vec_distance_cosine(vector, vec_f32(?)) ASC LIMIT ?;"),
                                (humanMessageVectorStr, maxLessImportantObservations))
+        return self.cursor.fetchall()
+    
+    def GetAllLessImportantObservations(self) -> list:
+        self.cursor.execute("SELECT plain_text FROM memories WHERE category = 'less_relevant';")
         return self.cursor.fetchall()
     
     def GetPossibleDuplicates(self, observationVectorStr: str) -> list:
